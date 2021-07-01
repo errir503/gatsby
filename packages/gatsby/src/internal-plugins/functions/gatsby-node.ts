@@ -209,8 +209,12 @@ const createWebpackConfig = async ({
       if (Page && Page.getServerData) {
         console.log('Page has getServerData Function')
         const propsPromise = Promise.resolve(Page.getServerData(req))
-        props = await propsPromise
-        console.log('Props from getServerData Function', props)
+        try {
+          props = await propsPromise
+          console.log('Props from getServerData Function', props)
+        } catch (e) {
+          console.error(e)
+        }
       }      
       console.log('Returning component string')
       return res.send(renderToString(React.createElement(Page.default, props)))
