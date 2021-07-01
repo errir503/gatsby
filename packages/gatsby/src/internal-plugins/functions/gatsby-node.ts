@@ -202,6 +202,7 @@ const createWebpackConfig = async ({
   const SSR_FUNCTION_TEMPLATE = ({ page, pathName }): string => `
     import * as React from 'react';
     import { renderToString } from 'react-dom/server';
+    import pageGenerator from '../../../cache-dir/ssr-static-entry';
     const Page = require("${page.component}");
     export default async function SSRPage(req, res) {
       console.log('SSRing ${pathName}!')
@@ -215,7 +216,24 @@ const createWebpackConfig = async ({
         } catch (e) {
           console.error(e)
         }
-      }      
+      }
+      
+      try {
+        const pageGenResult = pageGenerator({
+          pagePath: ${pathName},
+          pageData: props,
+          staticQueryContext: [],
+          styles: [],
+          scripts: [],
+          reversedStyles: [],
+          reversedScripts: [],
+          innerComponent: Page.default,
+        })
+        console.log(pageGenResult)
+      } catch (e) {
+        console.error(e)
+      }
+
       console.log('Returning component string')
       return res.send(renderToString(React.createElement(Page.default, props)))
     }
