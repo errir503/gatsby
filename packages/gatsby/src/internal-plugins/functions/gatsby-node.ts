@@ -220,7 +220,7 @@ const createWebpackConfig = async ({
       
       try {
         const pageGenResult = pageGenerator({
-          pagePath: ${pathName},
+          pagePath: '${pathName}',
           pageData: props,
           staticQueryContext: [],
           styles: [],
