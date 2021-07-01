@@ -145,6 +145,14 @@ const createWebpackConfig = async ({
     `functions`
   )
 
+  // create new ssr dir
+  const ssrFunctionsDir = path.join(siteDirectoryPath, `.cache`, `_ssr`)
+  try {
+    fs.mkdirpSync(ssrFunctionsDir)
+  } catch (err) {
+    // don't care
+  }
+
   const globs = createGlobArray(
     siteDirectoryPath,
     store.getState().flattenedPlugins
@@ -190,6 +198,50 @@ const createWebpackConfig = async ({
   // functions directory can override the plugin's implementations.
   // @ts-ignore - Seems like a TS bug: https://github.com/microsoft/TypeScript/issues/28010#issuecomment-713484584
   const knownFunctions = _.unionBy(...allFunctions, func => func.functionRoute)
+
+  const SSR_FUNCTION_TEMPLATE = ({ page, pathName }): string => `
+    import * as React from 'react';
+    import { renderToString } from 'react-dom/server';
+    const Page = require("${page.component}");
+    export default async function SSRPage(req, res) {
+      console.log('SSRing ${pathName}!')
+      let props = {}
+      if (Page && Page.getServerData) {
+        console.log('Page has getServerData Function')
+        props = await getServerData(req)
+        console.log('Props from getServerData Function', props)
+      }      
+      return res.send(renderToString(React.createElement(Page.default, props)))
+    }
+  `
+
+  // generate ssr function
+  for (const [pathName, page] of store.getState().pages) {
+    if (page.ssr) {
+      const compiledFunctionName = pathName + `.js`
+      knownFunctions.push({
+        functionRoute: `_ssr${pathName}`,
+        pluginName: `default-site-plugin`,
+        originalAbsoluteFilePath: path.join(
+          ssrFunctionsDir,
+          compiledFunctionName
+        ),
+        originalRelativeFilePath: path.join(`_ssr`, compiledFunctionName),
+        relativeCompiledFilePath: path.join(`_ssr`, compiledFunctionName),
+        absoluteCompiledFilePath: path.join(
+          compiledFunctionsDir,
+          `_ssr`,
+          compiledFunctionName
+        ),
+        matchPath: getMatchPath(`_ssr/${pathName}`),
+      })
+
+      fs.writeFileSync(
+        path.join(ssrFunctionsDir, pathName + `.js`),
+        SSR_FUNCTION_TEMPLATE({ page, pathName })
+      )
+    }
+  }
 
   store.dispatch(internalActions.setFunctions(knownFunctions))
 
@@ -308,7 +360,16 @@ const createWebpackConfig = async ({
           use: {
             loader: `babel-loader`,
             options: {
-              presets: [`@babel/typescript`],
+              presets: [
+                `@babel/typescript`,
+                [
+                  `babel-preset-gatsby`,
+                  {
+                    stage: `build-javascript`,
+                    reactRuntime: `classic`,
+                  },
+                ],
+              ],
             },
           },
         },
@@ -319,7 +380,7 @@ const createWebpackConfig = async ({
 }
 
 let isFirstBuild = true
-export async function onPreBootstrap({
+export async function onPostBootstrap({
   reporter,
   store,
 }: ParentSpanPluginArgs): Promise<void> {

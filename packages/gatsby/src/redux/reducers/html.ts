@@ -53,7 +53,11 @@ export function htmlReducer(
     case `CREATE_PAGE`: {
       // CREATE_PAGE can be called even if page already exist, so we only want to do anything
       // if we don't track given page yet or if page is marked as deleted
-      const { path } = action.payload
+      const { path, ssr } = action.payload
+
+      if (ssr) {
+        return state
+      }
 
       let htmlFile = state.trackedHtmlFiles.get(path)
       if (!htmlFile) {

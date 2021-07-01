@@ -96,6 +96,7 @@ type PageInput = {
   component: string,
   context?: Object,
   ownerNodeId?: string,
+  ssr?: boolean,
 }
 
 type Page = {
@@ -107,6 +108,7 @@ type Page = {
   componentChunkName: string,
   updatedAt: number,
   ownerNodeId?: string,
+  ssr?: boolean,
 }
 
 type ActionOptions = {
@@ -394,6 +396,7 @@ ${reservedFields.map(f => `  * "${f}"`).join(`\n`)}
     path: page.path,
     matchPath: page.matchPath,
     component: page.component,
+    ssr: !!page.ssr,
     componentChunkName: generateComponentChunkName(page.component),
     isCreatedByStatefulCreatePages:
       actionOptions?.traceId === `initial-createPagesStatefully`,

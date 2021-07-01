@@ -147,9 +147,12 @@ export const parseQueries = async ({
   // our babel plugin to remove the query on building is active.
   // Otherwise the component will throw an error in the browser of
   // "graphql is not defined".
-  files = files.concat(
-    Array.from(store.getState().components.keys(), c => normalize(c))
-  )
+
+  for (const [filePath, component] of store.getState().components) {
+    if (!component.ssr) {
+      files.push(normalize(filePath))
+    }
+  }
 
   files = _.uniq(files)
 

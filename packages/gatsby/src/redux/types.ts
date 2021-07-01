@@ -39,6 +39,7 @@ export interface IGatsbyPage {
   pluginCreatorId: Identifier
   componentPath: SystemPath
   ownerNodeId: Identifier
+  ssr?: boolean
 }
 
 export interface IGatsbyFunction {
@@ -125,6 +126,7 @@ export interface IGatsbyPageComponent {
   query: string
   pages: Set<string>
   isInBootstrap: boolean
+  ssr?: boolean
 }
 
 export interface IDefinitionMeta {
