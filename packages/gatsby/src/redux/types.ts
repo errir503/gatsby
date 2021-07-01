@@ -823,6 +823,7 @@ export interface IAddPageDataStatsAction {
     filePath: SystemPath
     size: number
     pageDataHash: string
+    ssr?: boolean
   }
 }
 

@@ -123,7 +123,11 @@ export function htmlReducer(
       return state
     }
     case `ADD_PAGE_DATA_STATS`: {
-      const htmlFile = state.trackedHtmlFiles.get(action.payload.pagePath)
+      const { pagePath, ssr } = action.payload
+      if (ssr) {
+        return state
+      }
+      const htmlFile = state.trackedHtmlFiles.get(pagePath)
       if (!htmlFile) {
         // invariant
         throw new Error(

@@ -17,6 +17,7 @@ interface IPageData {
   matchPath?: IGatsbyPage["matchPath"]
   path: IGatsbyPage["path"]
   staticQueryHashes: Array<string>
+  ssr?: boolean
 }
 
 export interface IPageDataWithQueryResult extends IPageData {
@@ -74,6 +75,7 @@ export async function writePageData(
     matchPath,
     path: pagePath,
     staticQueryHashes,
+    ssr,
   }: IPageData
 ): Promise<IPageDataWithQueryResult> {
   const inputFilePath = path.join(
@@ -105,6 +107,7 @@ export async function writePageData(
       filePath: outputFilePath,
       size: pageDataSize,
       pageDataHash: createContentDigest(bodyStr),
+      ssr,
     },
   })
 
