@@ -211,6 +211,7 @@ const createWebpackConfig = async ({
         props = await getServerData(req)
         console.log('Props from getServerData Function', props)
       }      
+      console.log('Returning component string')
       return res.send(renderToString(React.createElement(Page.default, props)))
     }
   `
