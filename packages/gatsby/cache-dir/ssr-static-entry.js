@@ -14,6 +14,8 @@ const chunkMapping = require(`../public/chunk-map.json`)
 
 const StaticQueryContext = React.createContext({})
 
+const __PATH_PREFIX__ = ``
+
 // we want to force posix-style joins, so Windows doesn't produce backslashes for urls
 const { join } = path.posix
 
