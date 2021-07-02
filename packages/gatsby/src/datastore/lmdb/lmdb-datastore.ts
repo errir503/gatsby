@@ -3,14 +3,30 @@ import { RootDatabase, open } from "lmdb-store"
 import { ActionsUnion, IGatsbyNode } from "../../redux/types"
 import { updateNodes } from "./updates/nodes"
 import { updateNodesByType } from "./updates/nodes-by-type"
-import { IDataStore, ILmdbDatabases, IRunQueryArgs, IQueryResult } from "../types"
+import {
+  IDataStore,
+  ILmdbDatabases,
+  IRunQueryArgs,
+  IQueryResult,
+} from "../types"
 import { emitter, replaceReducer } from "../../redux"
 import { GatsbyIterable } from "../common/iterable"
-import {
-  IRunFilterArg,
-  runFastFiltersAndSort,
-} from "../in-memory/run-fast-filters"
 import { doRunQuery } from "./query/run-query"
+
+const lmdbDatastore = {
+  getNode,
+  getTypes,
+  countNodes,
+  iterateNodes,
+  iterateNodesByType,
+  updateDataStore,
+  ready,
+  runQuery,
+
+  // deprecated:
+  getNodes,
+  getNodesByType,
+}
 
 const rootDbFile =
   process.env.NODE_ENV === `test`
@@ -99,7 +115,9 @@ function iterateNodes(): GatsbyIterable<IGatsbyNode> {
   return new GatsbyIterable(
     nodesDb
       .getKeys({ snapshot: false })
-      .map(nodeId => (typeof nodeId === `string` ? getNode(nodeId) : undefined)!)
+      .map(
+        nodeId => (typeof nodeId === `string` ? getNode(nodeId) : undefined)!
+      )
       .filter(Boolean)
   )
 }
@@ -177,20 +195,6 @@ function updateDataStore(action: ActionsUnion): void {
  */
 async function ready(): Promise<void> {
   await lastOperationPromise
-}
-
-const lmdbDatastore = {
-  getNode,
-  getTypes,
-  countNodes,
-  iterateNodes,
-  iterateNodesByType,
-  updateDataStore,
-  ready,
-
-  // deprecated:
-  getNodes,
-  getNodesByType,
 }
 
 export function setupLmdbStore(): IDataStore {
