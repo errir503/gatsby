@@ -161,10 +161,10 @@ For now, the general algorithm is simple:
 
 1. Pick fields that work both for `filter` and `sort`
    (as described in the [section](#queries-that-can-use-index) above)
-2. When it's not possible - pick `filter` fields (sorted by comparator specificity) if:
+2. When it's not possible - pick `filter` fields (sorted by predicate specificity) if:
    1. there are filters on multiple fields
    2. there is a single `eq` or `in` filter
-   3. there is a filter with two comparators (e.g. `gt` and `lt`)
+   3. there is a filter with two predicates (e.g. `gt` and `lt`)
 3. In all other cases - pick `sort` fields for index
 
 TODO: try to avoid fields on array values (so avoid MultiKey indexes when possible).

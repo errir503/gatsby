@@ -408,7 +408,7 @@ function extractRanges(
   const filter = getFilterStatement(bestMatchingQuery)
 
   if (filter.comparator === DbComparator.IN && !Array.isArray(filter.value)) {
-    throw new Error("The argument to the `in` comparator should be an array")
+    throw new Error("The argument to the `in` predicate should be an array")
   }
 
   switch (filter.comparator) {
@@ -500,7 +500,7 @@ function extractRanges(
       break
     }
     default:
-      throw new Error(`Unsupported comparator: ${filter.comparator}`)
+      throw new Error(`Unsupported predicate: ${filter.comparator}`)
   }
   return { usedQueries: used, rangeStarts, rangeEndings }
 }
@@ -508,7 +508,7 @@ function extractRanges(
 function findRangeEdge(
   queries: Array<DbQuery>,
   usedQueries: Set<DbQuery>,
-  comparator: DbComparator,
+  predicate: DbComparator,
   edge: ValueEdges = ValueEdges.NONE
 ): IndexFieldValue | RangeEdgeBefore | RangeEdgeAfter | undefined {
   for (const dbQuery of queries) {
@@ -516,17 +516,17 @@ function findRangeEdge(
       continue
     }
     const filterStatement = getFilterStatement(dbQuery)
-    if (filterStatement.comparator !== comparator) {
+    if (filterStatement.comparator !== predicate) {
       continue
     }
     usedQueries.add(dbQuery)
     const value = filterStatement.value
     if (Array.isArray(value)) {
-      throw new Error(`Range filter ${comparator} should not have array value`)
+      throw new Error(`Range filter ${predicate} should not have array value`)
     }
     if (typeof value === `object` && value !== null) {
       throw new Error(
-        `Range filter ${comparator} should not have value of type ${typeof value}`
+        `Range filter ${predicate} should not have value of type ${typeof value}`
       )
     }
     if (edge === 0) {
@@ -565,11 +565,11 @@ function compareByPredicateSpecificity(a: DbQuery, b: DbQuery): number {
   if (aPredicate === bPredicate) {
     return 0
   }
-  for (const comparator of canUseIndex) {
-    if (comparator === aPredicate) {
+  for (const predicate of canUseIndex) {
+    if (predicate === aPredicate) {
       return -1
     }
-    if (comparator === bPredicate) {
+    if (predicate === bPredicate) {
       return 1
     }
   }
@@ -582,7 +582,7 @@ function toIndexFieldValue(
 ): IndexFieldValue {
   if (typeof filterValue === `object` && filterValue !== null) {
     throw new Error(
-      `Bad filter value for filter ${filter.comparator}: ${inspect(
+      `Bad filter value for predicate ${filter.comparator}: ${inspect(
         filter.value
       )}`
     )

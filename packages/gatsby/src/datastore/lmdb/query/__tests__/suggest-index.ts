@@ -7,26 +7,26 @@ describe(`suggestIndex`, () => {
   describe(`filter: yes; sort: no`, () => {
     const sort = { fields: [], order: [] }
 
-    it(`throws on unknown comparators`, () => {
+    it(`throws on unknown predicates`, () => {
       const filter = { a: { unknown: `foo` } }
       expect(() => suggestIndex({ filter, sort })).toThrow()
     })
 
     it.each([[`eq`], [`in`], [`lt`], [`lte`], [`gt`], [`gte`]])(
-      `supports "%s" comparator`,
-      comparator => {
+      `supports "%s" predicate`,
+      predicate => {
         const filter = {
-          a: { [comparator]: `foo` },
+          a: { [predicate]: `foo` },
         }
         expect(suggestIndex({ filter, sort })).toEqual([[`a`, 1]])
       }
     )
 
     it.each([[`ne`], [`nin`], [`regex`, `/foo/`], [`glob`]])(
-      `does not support "%s" comparator`,
-      (comparator, value = `foo`) => {
+      `does not support "%s" predicate`,
+      (predicate, value = `foo`) => {
         const filter = {
-          a: { [comparator]: value },
+          a: { [predicate]: value },
         }
         expect(suggestIndex({ filter, sort })).toEqual([])
       }
@@ -40,7 +40,7 @@ describe(`suggestIndex`, () => {
         [`b`, `c`, `a`, `d`],
       ],
     ])(
-      `includes fields in index by comparator specificity: %#`,
+      `includes fields in index by predicate specificity: %#`,
       (filter, expectedFields) => {
         // expected specificity: eq, in, gte, lte, gt, lt
         const expected = expectedFields.map(f => [f, 1])
@@ -259,9 +259,9 @@ describe(`suggestIndex`, () => {
 
     describe.each([`lt`, `lte`, `gt`, `gte`])(
       `single "%s" filter`,
-      comparator => {
-        it(`prefers "sort" fields to single "${comparator}" filter`, () => {
-          const filter = { a: { [comparator]: [1, 2] } }
+      predicate => {
+        it(`prefers "sort" fields to single "${predicate}" filter`, () => {
+          const filter = { a: { [predicate]: [1, 2] } }
           const sort = { fields: [`b`, `c`], order: [] }
           expect(suggestIndex({ filter, sort })).toEqual([
             [`b`, 1],
@@ -269,8 +269,8 @@ describe(`suggestIndex`, () => {
           ])
         })
 
-        it(`merges "${comparator}" filter with sibling "sort" field`, () => {
-          const filter = { a: { [comparator]: `foo` } }
+        it(`merges "${predicate}" filter with sibling "sort" field`, () => {
+          const filter = { a: { [predicate]: `foo` } }
           const sort: Sort = { fields: [`a`, `b`], order: [`desc`, `desc`] }
           expect(suggestIndex({ filter, sort })).toEqual([
             [`a`, -1],
