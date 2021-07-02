@@ -177,7 +177,7 @@ function performRangeScan(
       ? { start, end, limit, offset, snapshot: false }
       : { start: end, end: start, limit, offset, reverse, snapshot: false }
 
-    console.log(`range`, range)
+    // console.log(`range`, range)
 
     // Assuming ranges are sorted and not overlapping, we can concat results
     const matches = indexes.getRange(range as any)
