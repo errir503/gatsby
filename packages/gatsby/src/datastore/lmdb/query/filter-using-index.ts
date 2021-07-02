@@ -155,6 +155,7 @@ function performRangeScan(
       //   by running first range query, counting results while lazily iterating and
       //   running the next range query when the previous iterator is done (and count is known)
       //   with offset = offset - previousRangeCount, limit = limit - previousRangeCount
+      limit = offset + limit
       offset = 0
     }
     if (stats.maxKeysPerItem > 1) {
@@ -165,7 +166,6 @@ function performRangeScan(
     }
   }
 
-  // console.log(`ranges`)
   let entries = new GatsbyIterable<IIndexEntry>([])
   for (let { start, end } of ranges) {
     start = [keyPrefix, ...start]
@@ -237,7 +237,7 @@ function performFullScan(context: IFilterContext): IFilterResult {
 }
 
 /**
- * Takes results after the index scan and tries to filter them additionally with unused parts of the index.
+ * Takes results after the index scan and tries to filter them additionally with unused parts of the query.
  *
  * This is O(N) but the advantage is that it uses data available in the index.
  * So it effectively bypasses the `getNode()` call for such filters (with all associated deserialization complexity).
@@ -374,7 +374,7 @@ export function getIndexRanges(
       end: rangeEndingsProduct[i],
     })
   }
-  // TODO: sort ranges. Also, we may want this at some point:
+  // TODO: sort and intersect ranges. Also, we may want this at some point:
   //   https://docs.mongodb.com/manual/core/multikey-index-bounds/
   return { usedQueries, ranges }
 }
