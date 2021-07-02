@@ -12,17 +12,23 @@ describe(`suggestIndex`, () => {
       expect(() => suggestIndex({ filter, sort })).toThrow()
     })
 
-    it.each([[`eq`], [`in`], [`lt`], [`lte`], [`gt`], [`gte`]])(
-      `supports "%s" predicate`,
-      predicate => {
-        const filter = {
-          a: { [predicate]: `foo` },
-        }
-        expect(suggestIndex({ filter, sort })).toEqual([[`a`, 1]])
+    it.each([
+      [`eq`],
+      [`in`],
+      [`lt`],
+      [`lte`],
+      [`gt`],
+      [`gte`],
+      [`ne`],
+      [`nin`],
+    ])(`supports "%s" predicate`, predicate => {
+      const filter = {
+        a: { [predicate]: `foo` },
       }
-    )
+      expect(suggestIndex({ filter, sort })).toEqual([[`a`, 1]])
+    })
 
-    it.each([[`ne`], [`nin`], [`regex`, `/foo/`], [`glob`]])(
+    it.each([[`regex`, `/foo/`], [`glob`]])(
       `does not support "%s" predicate`,
       (predicate, value = `foo`) => {
         const filter = {
@@ -34,7 +40,8 @@ describe(`suggestIndex`, () => {
 
     it.each([
       [{ a: { in: 1 }, b: { eq: 1 }, c: { gt: 1 } }, [`b`, `a`, `c`]],
-      [{ a: { ne: 1 }, b: { in: 1 }, c: { gt: 1 } }, [`b`, `c`]],
+      [{ a: { ne: 1 }, b: { eq: 1 }, c: { nin: [1, 2] } }, [`b`, `a`, `c`]],
+      [{ a: { glob: `*` }, b: { in: 1 }, c: { gt: 1 } }, [`b`, `c`]],
       [
         { a: { gt: 1 }, b: { gte: 1 }, c: { lte: 1 }, d: { lt: 1 } },
         [`b`, `c`, `a`, `d`],

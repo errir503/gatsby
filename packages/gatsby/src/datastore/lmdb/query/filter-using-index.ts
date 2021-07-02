@@ -55,9 +55,8 @@ const canUseIndex = new Set([
   DbComparator.LTE,
   DbComparator.GT,
   DbComparator.LT,
-  // TODO: NE and NIN can also potentially use indexes (need to invert eq/in ranges to make them work)
-  // DbComparator.NE,
-  // DbComparator.NIN
+  DbComparator.NE,
+  DbComparator.NIN,
 ])
 
 interface IFilterContext {
@@ -81,7 +80,11 @@ export interface IFilterResult {
 export function filterUsingIndex(context: IFilterContext): IFilterResult {
   const { dbQueries, indexMetadata } = context
   const indexFields = new Map(indexMetadata.keyFields)
-  const { ranges, usedQueries } = getIndexRanges(dbQueries, indexFields)
+  const { ranges, usedQueries } = getIndexRanges(
+    dbQueries,
+    indexFields,
+    new Set(indexMetadata.multiKeyFields)
+  )
 
   const result =
     ranges.length > 0
@@ -174,7 +177,7 @@ function performRangeScan(
       ? { start, end, limit, offset, snapshot: false }
       : { start: end, end: start, limit, offset, reverse, snapshot: false }
 
-    // console.log(`range`, range)
+    console.log(`range`, range)
 
     // Assuming ranges are sorted and not overlapping, we can concat results
     const matches = indexes.getRange(range as any)
@@ -200,7 +203,7 @@ function performFullScan(context: IFilterContext): IFilterResult {
   const {
     databases: { indexes },
     reverse,
-    indexMetadata: { keyPrefix },
+    indexMetadata: { keyPrefix, stats },
   } = context
   // console.log(`full scan`)
 
@@ -231,7 +234,8 @@ function performFullScan(context: IFilterContext): IFilterResult {
   )
 
   return {
-    entries: result.deduplicate(getIdentifier),
+    entries:
+      stats.maxKeysPerItem > 1 ? result.deduplicate(getIdentifier) : result,
     usedQueries: new Set(),
   }
 }
@@ -274,8 +278,15 @@ function narrowResultsIfPossible(
     const fieldName = dbQueryToDottedField(query)
     const indexInKey = fieldIndexInKey.get(fieldName)
     if (typeof indexInKey === `undefined`) continue
+    const filter = getFilterStatement(query)
+    if (
+      indexMetadata.multiKeyFields.length > 0 &&
+      (filter.comparator === DbComparator.NE ||
+        filter.comparator === DbComparator.NIN)
+    )
+      continue
     usedQueries.add(query)
-    filtersToApply.push([getFilterStatement(query), indexInKey])
+    filtersToApply.push([filter, indexInKey])
   }
 
   // console.log(`Narrowing result: `, filtersToApply)
@@ -325,7 +336,8 @@ export function getQueriesThatCanUseIndex(all: Array<DbQuery>): Array<DbQuery> {
 
 export function getIndexRanges(
   dbQueries: Array<DbQuery>,
-  indexFields: IndexFields
+  indexFields: IndexFields,
+  multiKeyFields: Set<string> = new Set()
 ): { usedQueries: Set<DbQuery>; ranges: Array<IIndexRange> } {
   const queriesThatCanUseIndex = getQueriesThatCanUseIndex(dbQueries)
 
@@ -333,8 +345,12 @@ export function getIndexRanges(
   const rangeStarts: Array<RangeBoundary> = []
   const rangeEndings: Array<RangeBoundary> = []
 
-  for (const indexField of indexFields) {
-    const result = extractRanges(queriesThatCanUseIndex, indexField)
+  for (const [indexField, sortDirection] of indexFields) {
+    const result = extractRanges(
+      queriesThatCanUseIndex,
+      [indexField, sortDirection],
+      multiKeyFields.has(indexField)
+    )
     if (!result.rangeStarts.length) {
       // No point to continue - just use index prefix, not all index fields
       break
@@ -381,7 +397,8 @@ export function getIndexRanges(
 
 function extractRanges(
   queries: Array<DbQuery>,
-  [indexField, sortDirection]: [fieldName: string, sortDirection: number]
+  [indexField, sortDirection]: [fieldName: string, sortDirection: number],
+  isMultiKeyField: boolean = false
 ): {
   usedQueries: Set<DbQuery>
   rangeStarts: RangeBoundary
@@ -398,18 +415,31 @@ function extractRanges(
     q => dbQueryToDottedField(q) === indexField
   )
   if (!fieldQueries.length) {
-    return { rangeStarts, rangeEndings: rangeEndings, usedQueries: used }
+    return { rangeStarts, rangeEndings, usedQueries: used }
   }
   // Assuming queries are sorted by specificity, the best bet is to pick the first query
   // TODO: add range intersection for most common cases (e.g. gte + ne)
   const bestMatchingQuery = fieldQueries[0]
-  used.add(bestMatchingQuery)
-
   const filter = getFilterStatement(bestMatchingQuery)
 
   if (filter.comparator === DbComparator.IN && !Array.isArray(filter.value)) {
     throw new Error("The argument to the `in` predicate should be an array")
   }
+  if (
+    isMultiKeyField &&
+    (filter.comparator === DbComparator.NE ||
+      filter.comparator === DbComparator.NIN)
+  ) {
+    // NE and NIN are not supported by multi-key indexes. Why?
+    //   Imagine a node { id: 1, field: [`foo`, `bar`] }
+    //   Then the filter { field: { ne: `foo` } } should completely remove this node from results.
+    //   But multikey index contains separate entries for `foo` and `bar` values.
+    //   Our range will not include entry "foo" but it will still include entry for "bar" hence
+    //   will include this node in results.
+    return { rangeStarts, rangeEndings, usedQueries: used }
+  }
+
+  used.add(bestMatchingQuery)
 
   switch (filter.comparator) {
     case DbComparator.EQ:
@@ -497,6 +527,34 @@ function extractRanges(
 
       rangeStarts.push(start)
       rangeEndings.push(end ?? rangeTail)
+      break
+    }
+    case DbComparator.NE:
+    case DbComparator.NIN: {
+      const arr = Array.isArray(filter.value)
+        ? [...filter.value]
+        : [filter.value]
+
+      // Sort ranges by index sort direction
+      arr.sort((a: any, b: any): number => {
+        if (a === b) return 0
+        if (sortDirection === 1) return a > b ? 1 : -1
+        return a < b ? 1 : -1
+      })
+      const hasNull = arr.some(value => value === null)
+
+      if (hasNull) {
+        rangeStarts.push(getValueEdgeAfter(undefinedSymbol))
+      } else {
+        rangeStarts.push(BinaryInfinityNegative)
+      }
+      for (const item of new Set(arr)) {
+        const value = toIndexFieldValue(item, filter)
+        if (value === null) continue // already handled via hasNull case above
+        rangeEndings.push(value)
+        rangeStarts.push(getValueEdgeAfter(value))
+      }
+      rangeEndings.push(BinaryInfinityPositive)
       break
     }
     default:

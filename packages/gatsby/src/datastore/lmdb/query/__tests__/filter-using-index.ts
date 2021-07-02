@@ -77,9 +77,54 @@ describe(`getIndexRangeQueries`, () => {
       ],
       [{ $gte: 6, $lt: 10 }, [{ start: [6], end: [10] }], [`$gte`, `$lt`]],
       [
-        { $eq: 1, $lte: 10, $gte: 6 },
-        [{ start: [1], end: [[1, BinaryInfinityPositive]] }],
-        [`$eq`],
+        // Returns empty result in lmdb
+        { $lt: 5, $gt: 5 },
+        [
+          {
+            start: [[5, BinaryInfinityPositive]],
+            end: [5],
+          },
+        ],
+        [`$gt`, `$lt`],
+      ],
+      [
+        { $ne: 1 },
+        [
+          { start: [BinaryInfinityNegative], end: [1] },
+          {
+            start: [[1, BinaryInfinityPositive]],
+            end: [BinaryInfinityPositive],
+          },
+        ],
+      ],
+      [
+        { $nin: [1, 2] },
+        [
+          { start: [BinaryInfinityNegative], end: [1] },
+          {
+            start: [[1, BinaryInfinityPositive]],
+            end: [2],
+          },
+          {
+            start: [[2, BinaryInfinityPositive]],
+            end: [BinaryInfinityPositive],
+          },
+        ],
+      ],
+      [
+        // Must produce the same set of ranges as $nin: [1, 2]
+        { $nin: [2, 1] },
+        [
+          { start: [BinaryInfinityNegative], end: [1] },
+          {
+            start: [[1, BinaryInfinityPositive]],
+            end: [2],
+          },
+          {
+            start: [[2, BinaryInfinityPositive]],
+            end: [BinaryInfinityPositive],
+          },
+        ],
       ],
       // Nulls hackery
       // $eq: null in gatsby must also include undefined!
@@ -129,6 +174,25 @@ describe(`getIndexRangeQueries`, () => {
         ],
       ],
       [
+        { $ne: null },
+        [
+          {
+            start: [undefinedNextEdge],
+            end: [BinaryInfinityPositive],
+          },
+        ],
+      ],
+      [
+        { $nin: [null, null] },
+        [
+          {
+            start: [undefinedNextEdge],
+            end: [BinaryInfinityPositive],
+          },
+        ],
+      ],
+      // Mixed predicates (picks the most specific one and applies others separately)
+      [
         { $eq: 1, $lte: 10, $gte: 6 },
         [
           {
@@ -152,17 +216,6 @@ describe(`getIndexRangeQueries`, () => {
         ],
         [`$in`],
       ],
-      [
-        // Returns empty result in lmdb
-        { $lt: 5, $gt: 5 },
-        [
-          {
-            start: [[5, BinaryInfinityPositive]],
-            end: [5],
-          },
-        ],
-        [`$gt`, `$lt`],
-      ],
     ])(`%o`, (filter, expectedRange, expectedUsed = []) => {
       const indexFields = new Map([[`field`, 1]])
       const dbQueries = createDbQueriesFromObject({ field: filter })
@@ -179,6 +232,30 @@ describe(`getIndexRangeQueries`, () => {
         expect(result.usedQueries.size).toEqual(1)
         expect(result.usedQueries).toContain(dbQueries[0])
       }
+    })
+
+    it(`does not support $ne with multiKey indexes`, () => {
+      const indexFields = new Map([[`field`, 1]])
+      const dbQueries = createDbQueriesFromObject({ field: { $ne: 1 } })
+      const { ranges, usedQueries } = getIndexRanges(
+        dbQueries,
+        indexFields,
+        new Set([`field`])
+      )
+      expect(ranges).toEqual([])
+      expect(usedQueries.size).toEqual(0)
+    })
+
+    it(`does not support $nin with multiKey indexes`, () => {
+      const indexFields = new Map([[`field`, 1]])
+      const dbQueries = createDbQueriesFromObject({ field: { $nin: [1] } })
+      const { ranges, usedQueries } = getIndexRanges(
+        dbQueries,
+        indexFields,
+        new Set([`field`])
+      )
+      expect(ranges).toEqual([])
+      expect(usedQueries.size).toEqual(0)
     })
   })
 
