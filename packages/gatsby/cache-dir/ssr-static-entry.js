@@ -8,7 +8,6 @@ const fs = require(`fs`)
 
 const { RouteAnnouncerProps } = require(`./route-announcer-props`)
 const apiRunner = require(`./api-runner-ssr`)
-const syncRequires = require(`$virtual/sync-requires`)
 const { version: gatsbyVersion } = require(`gatsby/package.json`)
 const { grabMatchParams } = require(`./find-path`)
 
