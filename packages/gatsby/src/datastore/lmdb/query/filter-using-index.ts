@@ -103,12 +103,16 @@ export function countUsingIndexOnly(context: IFilterContext): number {
   const {
     databases: { indexes },
     dbQueries,
-    indexMetadata: { keyPrefix, keyFields, stats },
+    indexMetadata: { keyPrefix, keyFields, stats, multiKeyFields },
   } = context
 
   const indexFields = new Map(keyFields)
 
-  const { ranges, usedQueries } = getIndexRanges(dbQueries, indexFields)
+  const { ranges, usedQueries } = getIndexRanges(
+    dbQueries,
+    indexFields,
+    new Set(multiKeyFields)
+  )
 
   if (usedQueries.size !== dbQueries.length) {
     throw new Error(
