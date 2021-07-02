@@ -399,7 +399,14 @@ const createWebpackConfig = async ({
         },
       ],
     },
-    plugins: [new webpack.DefinePlugin(processEnvVars)],
+    plugins: [
+      new webpack.DefinePlugin({
+        ...processEnvVars,
+        __BASE_PATH__: ``,
+        __PATH_PREFIX__: ``,
+        __ASSET_PREFIX__: ``,
+      }),
+    ],
   }
 }
 
