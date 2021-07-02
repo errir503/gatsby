@@ -3,7 +3,6 @@ const path = require(`path`)
 const { renderToString, renderToStaticMarkup } = require(`react-dom/server`)
 const { ServerLocation, Router, isRedirect } = require(`@gatsbyjs/reach-router`)
 const { merge, flattenDeep, replace } = require(`lodash`)
-const { StaticQueryContext } = require(`gatsby`)
 const fs = require(`fs`)
 
 const { RouteAnnouncerProps } = require(`./route-announcer-props`)
@@ -12,6 +11,8 @@ const { version: gatsbyVersion } = require(`gatsby/package.json`)
 const { grabMatchParams } = require(`./find-path`)
 
 const chunkMapping = require(`../public/chunk-map.json`)
+
+const StaticQueryContext = React.createContext({})
 
 // we want to force posix-style joins, so Windows doesn't produce backslashes for urls
 const { join } = path.posix
@@ -430,6 +431,8 @@ export default ({
         path={pagePath}
       />
     )}`
+
+    console.log({ html, unsafeBuiltinsUsage: global.unsafeBuiltinUsage })
 
     return { html, unsafeBuiltinsUsage: global.unsafeBuiltinUsage }
   } catch (e) {
