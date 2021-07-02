@@ -12,12 +12,6 @@ import { undefinedSymbol } from "../create-index"
 const undefinedNextEdge = [undefinedSymbol, BinaryInfinityPositive]
 
 describe(`getIndexRangeQueries`, () => {
-  const allFilter = {
-    mixedEqLteGte: { $eq: 1, $lte: 10, $gte: 6 },
-    mixedInLteGte: { $in: [1, 2], $lte: 10, $gte: 6 },
-  }
-  const dbQueries = createDbQueriesFromObject(allFilter)
-
   describe(`Ranges on a single field`, () => {
     // Each row is:
     // [filter, expected ranges, expected used predicates]
@@ -134,6 +128,41 @@ describe(`getIndexRangeQueries`, () => {
           },
         ],
       ],
+      [
+        { $eq: 1, $lte: 10, $gte: 6 },
+        [
+          {
+            start: [1],
+            end: [[1, BinaryInfinityPositive]],
+          },
+        ],
+        [`$eq`],
+      ],
+      [
+        { $in: [1, 2], $lte: 10, $gte: 6 },
+        [
+          {
+            start: [1],
+            end: [[1, BinaryInfinityPositive]],
+          },
+          {
+            start: [2],
+            end: [[2, BinaryInfinityPositive]],
+          },
+        ],
+        [`$in`],
+      ],
+      [
+        // Returns empty result in lmdb
+        { $lt: 5, $gt: 5 },
+        [
+          {
+            start: [[5, BinaryInfinityPositive]],
+            end: [5],
+          },
+        ],
+        [`$gt`, `$lt`],
+      ],
     ])(`%o`, (filter, expectedRange, expectedUsed = []) => {
       const indexFields = new Map([[`field`, 1]])
       const dbQueries = createDbQueriesFromObject({ field: filter })
@@ -153,7 +182,74 @@ describe(`getIndexRangeQueries`, () => {
     })
   })
 
-  describe(`Index on two fields`, () => {
-    // TODO
+  describe(`Ranges on two fields`, () => {
+    // Each row is:
+    // [filters, expected ranges, expected used predicates]
+    // if expected used predicates not set - expecting the first from each field filter
+    test.each([
+      [
+        { foo: { $eq: 1 }, bar: { $eq: `bar` } },
+        [
+          {
+            start: [1, `bar`],
+            end: [
+              [1, BinaryInfinityPositive],
+              [`bar`, BinaryInfinityPositive],
+            ],
+          },
+        ],
+      ],
+      // TODO: actual range intersection
+      //  (ATM we will return a subset and then additionally apply remaining filters outside of the index scan)
+      [
+        { foo: { $eq: 1, $gt: 2 }, bar: { $in: [`bar`, `baz`], $lt: `foo` } },
+        [
+          {
+            start: [1, `bar`],
+            end: [
+              [1, BinaryInfinityPositive],
+              [`bar`, BinaryInfinityPositive],
+            ],
+          },
+          {
+            start: [1, `baz`],
+            end: [
+              [1, BinaryInfinityPositive],
+              [`baz`, BinaryInfinityPositive],
+            ],
+          },
+        ],
+        { foo: [`$eq`], bar: [`$in`] },
+      ],
+    ])(
+      `%o`,
+      (filters, expectedRange, expectedUsed: any = { foo: [], bar: [] }) => {
+        const indexFields = new Map([
+          [`foo`, 1],
+          [`bar`, 1],
+        ])
+        const dbQueries = createDbQueriesFromObject(filters)
+        const result = getIndexRanges(dbQueries, indexFields)
+        expect(result.ranges).toEqual(expectedRange)
+
+        if (expectedUsed.foo.length) {
+          const expectedDbQuery1 = dbQueries.find(q =>
+            expectedUsed.foo.includes(getFilterStatement(q).comparator)
+          )
+          const expectedDbQuery2 = dbQueries.find(q =>
+            expectedUsed.bar.includes(getFilterStatement(q).comparator)
+          )
+          expect(result.usedQueries.size).toEqual(
+            expectedUsed.foo.length + expectedUsed.bar.length
+          )
+          expect(result.usedQueries).toContain(expectedDbQuery1)
+          expect(result.usedQueries).toContain(expectedDbQuery2)
+        } else {
+          expect(result.usedQueries.size).toEqual(2)
+          expect(result.usedQueries).toContain(dbQueries[0])
+          expect(result.usedQueries).toContain(dbQueries[1])
+        }
+      }
+    )
   })
 })
