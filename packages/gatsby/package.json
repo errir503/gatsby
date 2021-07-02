@@ -1,7 +1,7 @@
 {
   "name": "gatsby",
   "description": "Blazing fast modern site generator for React",
-  "version": "3.6.0-alpha-ssr.246+f11e337ba8",
+  "version": "3.6.0-alpha-ssr.257+571bf74feb",
   "author": "Kyle Mathews <mathews.kyle@gmail.com>",
   "bin": {
     "gatsby": "./cli.js"
@@ -259,5 +259,5 @@
   "yargs": {
     "boolean-negation": false
   },
-  "gitHead": "f11e337ba8a986c931d31c01508c0083eb5ca4ac"
+  "gitHead": "571bf74feb4336baa80fb5392815c7cf7e94e850"
 }
