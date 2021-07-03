@@ -40,7 +40,7 @@ describe(`suggestIndex`, () => {
 
     it.each([
       [{ a: { in: 1 }, b: { eq: 1 }, c: { gt: 1 } }, [`b`, `a`, `c`]],
-      [{ a: { ne: 1 }, b: { eq: 1 }, c: { nin: [1, 2] } }, [`b`, `a`, `c`]],
+      [{ a: { ne: 1 }, b: { eq: 1 }, c: { nin: [1, 2] } }, [`b`, `c`, `a`]],
       [{ a: { glob: `*` }, b: { in: 1 }, c: { gt: 1 } }, [`b`, `c`]],
       [
         { a: { gt: 1 }, b: { gte: 1 }, c: { lte: 1 }, d: { lt: 1 } },

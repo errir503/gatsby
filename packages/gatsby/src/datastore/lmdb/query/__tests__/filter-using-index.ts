@@ -7,11 +7,11 @@ import {
   BinaryInfinityPositive,
   BinaryInfinityNegative,
 } from "../filter-using-index"
-import { undefinedSymbol } from "../create-index"
+import { IIndexMetadata, undefinedSymbol } from "../create-index"
 
 const undefinedNextEdge = [undefinedSymbol, BinaryInfinityPositive]
 
-describe(`getIndexRangeQueries`, () => {
+describe(`getIndexRanges`, () => {
   describe(`Ranges on a single field`, () => {
     // Each row is:
     // [filter, expected ranges, expected used predicates]
@@ -217,45 +217,43 @@ describe(`getIndexRangeQueries`, () => {
         [`$in`],
       ],
     ])(`%o`, (filter, expectedRange, expectedUsed = []) => {
-      const indexFields = new Map([[`field`, 1]])
+      const context = createContext({ keyFields: [[`field`, 1]] })
       const dbQueries = createDbQueriesFromObject({ field: filter })
-      const result = getIndexRanges(dbQueries, indexFields)
-      expect(result.ranges).toEqual(expectedRange)
+      const ranges = getIndexRanges(context, dbQueries)
+      expect(ranges).toEqual(expectedRange)
 
       if (expectedUsed.length) {
         const expectedDbQueries = dbQueries.find(q =>
           expectedUsed.includes(getFilterStatement(q).comparator)
         )
-        expect(result.usedQueries.size).toEqual(expectedUsed.length)
-        expect(result.usedQueries).toContain(expectedDbQueries)
+        expect(context.usedQueries.size).toEqual(expectedUsed.length)
+        expect(context.usedQueries).toContain(expectedDbQueries)
       } else {
-        expect(result.usedQueries.size).toEqual(1)
-        expect(result.usedQueries).toContain(dbQueries[0])
+        expect(context.usedQueries.size).toEqual(1)
+        expect(context.usedQueries).toContain(dbQueries[0])
       }
     })
 
     it(`does not support $ne with multiKey indexes`, () => {
-      const indexFields = new Map([[`field`, 1]])
+      const context = createContext({
+        keyFields: [[`field`, 1]],
+        multiKeyFields: [`field`],
+      })
       const dbQueries = createDbQueriesFromObject({ field: { $ne: 1 } })
-      const { ranges, usedQueries } = getIndexRanges(
-        dbQueries,
-        indexFields,
-        new Set([`field`])
-      )
+      const ranges = getIndexRanges(context, dbQueries)
       expect(ranges).toEqual([])
-      expect(usedQueries.size).toEqual(0)
+      expect(context.usedQueries.size).toEqual(0)
     })
 
     it(`does not support $nin with multiKey indexes`, () => {
-      const indexFields = new Map([[`field`, 1]])
+      const context = createContext({
+        keyFields: [[`field`, 1]],
+        multiKeyFields: [`field`],
+      })
       const dbQueries = createDbQueriesFromObject({ field: { $nin: [1] } })
-      const { ranges, usedQueries } = getIndexRanges(
-        dbQueries,
-        indexFields,
-        new Set([`field`])
-      )
+      const ranges = getIndexRanges(context, dbQueries)
       expect(ranges).toEqual([])
-      expect(usedQueries.size).toEqual(0)
+      expect(context.usedQueries.size).toEqual(0)
     })
   })
 
@@ -301,13 +299,15 @@ describe(`getIndexRangeQueries`, () => {
     ])(
       `%o`,
       (filters, expectedRange, expectedUsed: any = { foo: [], bar: [] }) => {
-        const indexFields = new Map([
-          [`foo`, 1],
-          [`bar`, 1],
-        ])
+        const context = createContext({
+          keyFields: [
+            [`foo`, 1],
+            [`bar`, 1],
+          ],
+        })
         const dbQueries = createDbQueriesFromObject(filters)
-        const result = getIndexRanges(dbQueries, indexFields)
-        expect(result.ranges).toEqual(expectedRange)
+        const ranges = getIndexRanges(context, dbQueries)
+        expect(ranges).toEqual(expectedRange)
 
         if (expectedUsed.foo.length) {
           const expectedDbQuery1 = dbQueries.find(q =>
@@ -316,17 +316,28 @@ describe(`getIndexRangeQueries`, () => {
           const expectedDbQuery2 = dbQueries.find(q =>
             expectedUsed.bar.includes(getFilterStatement(q).comparator)
           )
-          expect(result.usedQueries.size).toEqual(
+          expect(context.usedQueries.size).toEqual(
             expectedUsed.foo.length + expectedUsed.bar.length
           )
-          expect(result.usedQueries).toContain(expectedDbQuery1)
-          expect(result.usedQueries).toContain(expectedDbQuery2)
+          expect(context.usedQueries).toContain(expectedDbQuery1)
+          expect(context.usedQueries).toContain(expectedDbQuery2)
         } else {
-          expect(result.usedQueries.size).toEqual(2)
-          expect(result.usedQueries).toContain(dbQueries[0])
-          expect(result.usedQueries).toContain(dbQueries[1])
+          expect(context.usedQueries.size).toEqual(2)
+          expect(context.usedQueries).toContain(dbQueries[0])
+          expect(context.usedQueries).toContain(dbQueries[1])
         }
       }
     )
   })
+
+  function createContext(indexMetadata: Partial<IIndexMetadata>): any {
+    return {
+      indexMetadata: {
+        keyFields: [],
+        multiKeyFields: [],
+        ...indexMetadata,
+      },
+      usedQueries: new Set(),
+    }
+  }
 })
