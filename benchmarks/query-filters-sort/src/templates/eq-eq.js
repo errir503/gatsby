@@ -1,0 +1,24 @@
+import React from "react"
+import { graphql } from "gatsby"
+
+export default ({ data }) => {
+  if (!data?.allTest?.nodes) {
+    throw new Error("Wrong data: " + JSON.stringify(data))
+  }
+  return <div>{JSON.stringify(data)}</div>
+}
+
+export const query = graphql`
+  query($fooBar: String!, $fooBarBaz: String!, $sort: TestSortInput) {
+    allTest(
+      filter: { fooBar: { eq: $fooBar }, fooBarBaz: { eq: $fooBarBaz } }
+      sort: $sort
+      limit: 100
+    ) {
+      nodes {
+        nodeNum
+        text
+      }
+    }
+  }
+`

@@ -19,9 +19,10 @@ exports.createSchemaCustomization = ({ actions }) => {
       pageNum: Int!
       unique: String!
       fooBar: String!
+      fooBarBaz: String!
       fooBarArray: [TestFooBarArray!]
       text: String!
-      randon: Float
+      random: Float
     }
     type TestFooBarArray {
       fooBar: String!
@@ -39,6 +40,7 @@ exports.sourceNodes = async ({ actions: { createNode } }) => {
       pageNum,
       unique: String(nodeNum),
       fooBar: [`foo`, `bar`, `baz`, `foobar`][nodeNum % 4],
+      fooBarBaz: [`foo`, `bar`, `baz`][pageNum % 3],
       fooBarArray: [
         { fooBar: [`foo`, `bar`, `baz`, `foobar`][nodeNum % 4] },
         { fooBar: [`bar`, `baz`, `foobar`, `foo`][nodeNum % 4] },
@@ -73,6 +75,7 @@ exports.createPages = async ({ actions: { createPage } }) => {
           [`foo`, `bar`, `baz`, `foobar`][(pageNum + 1) % 4],
         ],
         fooBar: [`foo`, `bar`, `baz`, `foobar`][pageNum % 4],
+        fooBarBaz: [`foo`, `bar`, `baz`][pageNum % 3],
         pageNum: pageNum,
         pagesLeft: NUM_PAGES - pageNum,
         limit: nodesPerPage,
