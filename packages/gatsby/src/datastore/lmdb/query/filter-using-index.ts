@@ -6,11 +6,11 @@ import {
   dbQueryToDottedField,
   getFilterStatement,
   IDbFilterStatement,
+  sortBySpecificity,
 } from "../../common/query"
 import { IDataStore, ILmdbDatabases, NodeId } from "../../types"
 import {
   IIndexMetadata,
-  IndexFields,
   IndexFieldValue,
   IndexKey,
   undefinedSymbol,
@@ -48,18 +48,7 @@ enum ValueEdges {
   AFTER = 1,
 }
 
-const canUseIndex = new Set([
-  DbComparator.EQ,
-  DbComparator.IN,
-  DbComparator.GTE,
-  DbComparator.LTE,
-  DbComparator.GT,
-  DbComparator.LT,
-  DbComparator.NE,
-  DbComparator.NIN,
-])
-
-interface IFilterContext {
+export interface IFilterArgs {
   datastore: IDataStore
   databases: ILmdbDatabases
   dbQueries: Array<DbQuery>
@@ -69,59 +58,48 @@ interface IFilterContext {
   reverse?: boolean
 }
 
+interface IFilterContext extends IFilterArgs {
+  usedQueries: Set<DbQuery>
+}
+
 export interface IFilterResult {
   entries: GatsbyIterable<IIndexEntry>
   usedQueries: Set<DbQuery>
 }
 
-/**
- * Note: since it returns full index entries - it may contain duplicates
- */
-export function filterUsingIndex(context: IFilterContext): IFilterResult {
-  const { dbQueries, indexMetadata } = context
-  const indexFields = new Map(indexMetadata.keyFields)
-  const { ranges, usedQueries } = getIndexRanges(
-    dbQueries,
-    indexFields,
-    new Set(indexMetadata.multiKeyFields)
-  )
+export function filterUsingIndex(args: IFilterArgs): IFilterResult {
+  const context = createFilteringContext(args)
+  const ranges = getIndexRanges(context, args.dbQueries)
 
-  const result =
+  let entries = new GatsbyIterable<IIndexEntry>(() =>
     ranges.length > 0
-      ? performRangeScan(context, ranges, usedQueries)
+      ? performRangeScan(context, ranges)
       : performFullScan(context)
-
-  if (usedQueries.size === dbQueries.length) {
-    // Query is fully satisfied by the index, yay
-    return result
+  )
+  if (context.usedQueries.size !== args.dbQueries.length) {
+    // Try to additionally filter out results using data stored in index
+    entries = narrowResultsIfPossible(context, entries)
   }
-
-  return narrowResultsIfPossible(context, result)
+  if (isMultiKeyIndex(context) && needsDeduplication(context)) {
+    entries = entries.deduplicate(getIdentifier)
+  }
+  return { entries, usedQueries: context.usedQueries }
 }
 
-export function countUsingIndexOnly(context: IFilterContext): number {
+export function countUsingIndexOnly(args: IFilterArgs): number {
+  const context = createFilteringContext(args)
   const {
     databases: { indexes },
     dbQueries,
-    indexMetadata: { keyPrefix, keyFields, stats, multiKeyFields },
-  } = context
+    indexMetadata: { keyPrefix },
+  } = args
 
-  const indexFields = new Map(keyFields)
+  const ranges = getIndexRanges(context, args.dbQueries)
 
-  const { ranges, usedQueries } = getIndexRanges(
-    dbQueries,
-    indexFields,
-    new Set(multiKeyFields)
-  )
-
-  if (usedQueries.size !== dbQueries.length) {
-    throw new Error(
-      `Cannot count using index. Some field filters cannot be resolved by index.`
-    )
+  if (context.usedQueries.size !== dbQueries.length) {
+    throw new Error(`Cannot count using index only`)
   }
-  if (stats.maxKeysPerItem > 1) {
-    // TODO: we probably can count in this case if all indexMetadata.multiKeyFields have `eq` filters in usedQueries
-    //   Also for range-less queries by doing count/avgKeysPerItem
+  if (isMultiKeyIndex(context) && needsDeduplication(context)) {
     throw new Error(`Cannot count using MultiKey index.`)
   }
   if (ranges.length === 0) {
@@ -141,11 +119,38 @@ export function countUsingIndexOnly(context: IFilterContext): number {
   return count
 }
 
-function performRangeScan(
+function createFilteringContext(args: IFilterArgs): IFilterContext {
+  return {
+    ...args,
+    usedQueries: new Set<DbQuery>(),
+  }
+}
+
+function isMultiKeyIndex(context: IFilterContext): boolean {
+  return context.indexMetadata.multiKeyFields.length > 0
+}
+
+function needsDeduplication(context: IFilterContext): boolean {
+  if (!isMultiKeyIndex(context)) {
+    return false
+  }
+  // Deduplication is not needed if all multiKeyFields have applied `eq` filters
+  const fieldsWithAppliedEq = new Set<string>()
+  context.usedQueries.forEach(q => {
+    const filter = getFilterStatement(q)
+    if (filter.comparator === DbComparator.EQ) {
+      fieldsWithAppliedEq.add(dbQueryToDottedField(q))
+    }
+  })
+  return context.indexMetadata.multiKeyFields.some(
+    fieldName => !fieldsWithAppliedEq.has(fieldName)
+  )
+}
+
+function* performRangeScan(
   context: IFilterContext,
-  ranges: Array<IIndexRange>,
-  usedQueries: Set<DbQuery>
-): IFilterResult {
+  ranges: Array<IIndexRange>
+): Generator<IIndexEntry> {
   const {
     databases: { indexes },
     indexMetadata: { keyPrefix, stats },
@@ -172,34 +177,20 @@ function performRangeScan(
       limit *= stats.maxKeysPerItem
     }
   }
-
-  let entries = new GatsbyIterable<IIndexEntry>([])
+  // Assuming ranges are sorted and not overlapping, we can yield results sequentially
   for (let { start, end } of ranges) {
     start = [keyPrefix, ...start]
     end = [keyPrefix, ...end]
     const range = !reverse
       ? { start, end, limit, offset, snapshot: false }
       : { start: end, end: start, limit, offset, reverse, snapshot: false }
-
     // console.log(`range`, range)
-
-    // Assuming ranges are sorted and not overlapping, we can concat results
-    const matches = indexes.getRange(range as any)
-    entries = entries.concat(matches)
-  }
-  if (stats.maxKeysPerItem > 1) {
-    // MultiKey indexes require additional deduplication step :/
-    // TODO: probably no need if all indexMetadata.multiKeyFields have `eq` filters in usedQueries
-    entries = entries.deduplicate(getIdentifier)
-  }
-
-  return {
-    entries,
-    usedQueries,
+    // @ts-ignore
+    yield* indexes.getRange(range)
   }
 }
 
-function performFullScan(context: IFilterContext): IFilterResult {
+function* performFullScan(context: IFilterArgs): Generator<IIndexEntry> {
   // *Caveat*: our old query implementation was putting undefined and null values at the end
   //   of the list when ordered ascending. But lmdb-store keeps them at the top.
   //   So in LMDB case, need to concat two ranges to conform to our old format:
@@ -207,7 +198,7 @@ function performFullScan(context: IFilterContext): IFilterResult {
   const {
     databases: { indexes },
     reverse,
-    indexMetadata: { keyPrefix, stats },
+    indexMetadata: { keyPrefix },
   } = context
   // console.log(`full scan`)
 
@@ -219,7 +210,7 @@ function performFullScan(context: IFilterContext): IFilterResult {
 
   // console.log(`full-scan-range1`, range)
 
-  const undefinedToEnd: any = indexes.getRange(range as any) // FIXME: lmdb-store typing seems outdated
+  const undefinedToEnd = range
 
   // Concat null/undefined values
   end = start
@@ -227,20 +218,20 @@ function performFullScan(context: IFilterContext): IFilterResult {
   range = !reverse
     ? { start, end, snapshot: false }
     : { start: end, end: start, reverse, snapshot: false }
-  const topToUndefined: any = indexes.getRange(range as any)
+
+  const topToUndefined = range
 
   // console.log(`full-scan-range2`, range, Array.from(topToUndefined))
-
-  const result = new GatsbyIterable<IIndexEntry>(
-    !reverse
-      ? undefinedToEnd.concat(topToUndefined)
-      : topToUndefined.concat(undefinedToEnd)
-  )
-
-  return {
-    entries:
-      stats.maxKeysPerItem > 1 ? result.deduplicate(getIdentifier) : result,
-    usedQueries: new Set(),
+  if (!reverse) {
+    // @ts-ignore
+    yield* indexes.getRange(undefinedToEnd)
+    // @ts-ignore
+    yield* indexes.getRange(topToUndefined)
+  } else {
+    // @ts-ignore
+    yield* indexes.getRange(topToUndefined)
+    // @ts-ignore
+    yield* indexes.getRange(undefinedToEnd)
   }
 }
 
@@ -264,107 +255,124 @@ function performFullScan(context: IFilterContext): IFilterResult {
  */
 function narrowResultsIfPossible(
   context: IFilterContext,
-  result: IFilterResult
-): IFilterResult {
-  const { indexMetadata, dbQueries } = context
-  const usedQueries = new Set([...result.usedQueries])
+  entries: GatsbyIterable<IIndexEntry>
+): GatsbyIterable<IIndexEntry> {
+  const { indexMetadata, dbQueries, usedQueries } = context
 
-  const fieldIndexInKey = new Map<string, number>()
-  indexMetadata.keyFields.forEach(([fieldName], position) => {
-    fieldIndexInKey.set(fieldName, position + 1) // +1 to offset index id at the beginning of the index
+  const indexFields = new Map<string, number>()
+  indexMetadata.keyFields.forEach(([fieldName], positionInKey) => {
+    indexFields.set(fieldName, positionInKey + 1) // +1 to offset index id at the beginning of the index
   })
 
   type Filter = [filter: IDbFilterStatement, fieldPositionInIndex: number]
   const filtersToApply: Array<Filter> = []
 
   for (const query of dbQueries) {
-    if (usedQueries.has(query)) continue
     const fieldName = dbQueryToDottedField(query)
-    const indexInKey = fieldIndexInKey.get(fieldName)
-    if (typeof indexInKey === `undefined`) continue
-    const filter = getFilterStatement(query)
-    if (
-      indexMetadata.multiKeyFields.length > 0 &&
-      (filter.comparator === DbComparator.NE ||
-        filter.comparator === DbComparator.NIN)
-    )
+    const positionInKey = indexFields.get(fieldName)
+
+    if (typeof positionInKey === `undefined`) {
+      // No data for this field in index
       continue
+    }
+    if (usedQueries.has(query)) {
+      // Filter is already applied
+      continue
+    }
+    if (isMultiKeyIndex(context) && isNegatedQuery(query)) {
+      // NE/NIN not supported with MultiKey indexes:
+      //   MultiKey indexes include duplicates; negated queries will only filter some of those
+      //   but may still incorrectly include others in final results
+      continue
+    }
+    const filter = getFilterStatement(query)
+    filtersToApply.push([filter, positionInKey])
     usedQueries.add(query)
-    filtersToApply.push([filter, indexInKey])
   }
 
-  // console.log(`Narrowing result: `, filtersToApply)
-  let items = 0
-  // const start = Date.now()
-  let shown = false
+  return filtersToApply.length === 0
+    ? entries
+    : entries.filter(({ key }) => {
+        for (const [filter, fieldPositionInIndex] of filtersToApply) {
+          const value =
+            key[fieldPositionInIndex] === undefinedSymbol
+              ? undefined
+              : key[fieldPositionInIndex]
 
-  return {
-    usedQueries,
-    entries:
-      filtersToApply.length === 0
-        ? result.entries
-        : result.entries.filter(({ key }) => {
-            if (!shown && items++ > 5000) {
-              shown = true
-              // console.log(
-              //   `Narrowing huge dataset for: ${
-              //     indexMetadata.keyPrefix
-              //   }; spent: ${Date.now() - start}ms`
-              // )
-            }
-            for (const [filter, fieldPositionInIndex] of filtersToApply) {
-              const value =
-                key[fieldPositionInIndex] === undefinedSymbol
-                  ? undefined
-                  : key[fieldPositionInIndex]
-
-              if (!shouldFilter(filter, value)) {
-                // Mimic AND semantics
-                return false
-              }
-            }
-            return true
-          }),
-  }
+          if (!shouldFilter(filter, value)) {
+            // Mimic AND semantics
+            return false
+          }
+        }
+        return true
+      })
 }
 
 /**
  * Returns query clauses that can potentially use index.
  * Returned list is sorted by query specificity
  */
-export function getQueriesThatCanUseIndex(all: Array<DbQuery>): Array<DbQuery> {
-  return all
-    .filter(q => canUseIndex.has(getFilterStatement(q).comparator))
-    .sort(compareByPredicateSpecificity)
+function getSupportedRangeQueries(
+  context: IFilterContext,
+  dbQueries: Array<DbQuery>
+): Array<DbQuery> {
+  const isSupported = new Set([
+    DbComparator.EQ,
+    DbComparator.IN,
+    DbComparator.GTE,
+    DbComparator.LTE,
+    DbComparator.GT,
+    DbComparator.LT,
+    DbComparator.NIN,
+    DbComparator.NE,
+  ])
+  let supportedQueries = dbQueries.filter(query =>
+    isSupported.has(getFilterStatement(query).comparator)
+  )
+  if (isMultiKeyIndex(context)) {
+    // Note:
+    // NE and NIN are not supported by multi-key indexes. Why?
+    //   Imagine a node { id: 1, field: [`foo`, `bar`] }
+    //   Then the filter { field: { ne: `foo` } } should completely remove this node from results.
+    //   But multikey index contains separate entries for `foo` and `bar` values.
+    //   Final range will exclude entry "foo" but it will still include entry for "bar" hence
+    //   will incorrectly include our node in results.
+    supportedQueries = supportedQueries.filter(query => !isNegatedQuery(query))
+  }
+  return sortBySpecificity(supportedQueries)
+}
+
+function isNegatedQuery(query: DbQuery): boolean {
+  const filter = getFilterStatement(query)
+  return (
+    filter.comparator === DbComparator.NE ||
+    filter.comparator === DbComparator.NIN
+  )
 }
 
 export function getIndexRanges(
-  dbQueries: Array<DbQuery>,
-  indexFields: IndexFields,
-  multiKeyFields: Set<string> = new Set()
-): { usedQueries: Set<DbQuery>; ranges: Array<IIndexRange> } {
-  const queriesThatCanUseIndex = getQueriesThatCanUseIndex(dbQueries)
-
-  const usedQueries = new Set<DbQuery>()
+  context: IFilterContext,
+  dbQueries: Array<DbQuery>
+): Array<IIndexRange> {
+  const {
+    indexMetadata: { keyFields },
+  } = context
   const rangeStarts: Array<RangeBoundary> = []
   const rangeEndings: Array<RangeBoundary> = []
+  const supportedQueries = getSupportedRangeQueries(context, dbQueries)
 
-  for (const [indexField, sortDirection] of indexFields) {
-    const result = extractRanges(
-      queriesThatCanUseIndex,
-      [indexField, sortDirection],
-      multiKeyFields.has(indexField)
-    )
+  for (const indexField of new Map(keyFields)) {
+    const result = getIndexFieldRanges(context, supportedQueries, indexField)
+
     if (!result.rangeStarts.length) {
       // No point to continue - just use index prefix, not all index fields
       break
     }
-    result.usedQueries.forEach(q => usedQueries.add(q))
     rangeStarts.push(result.rangeStarts)
     rangeEndings.push(result.rangeEndings)
   }
   if (!rangeStarts.length) {
-    return { usedQueries, ranges: [] }
+    return []
   }
   // Example:
   //   rangeStarts: [
@@ -396,15 +404,14 @@ export function getIndexRanges(
   }
   // TODO: sort and intersect ranges. Also, we may want this at some point:
   //   https://docs.mongodb.com/manual/core/multikey-index-bounds/
-  return { usedQueries, ranges }
+  return ranges
 }
 
-function extractRanges(
+function getIndexFieldRanges(
+  context: IFilterContext,
   queries: Array<DbQuery>,
-  [indexField, sortDirection]: [fieldName: string, sortDirection: number],
-  isMultiKeyField: boolean = false
+  [indexField, sortDirection]: [fieldName: string, sortDirection: number]
 ): {
-  usedQueries: Set<DbQuery>
   rangeStarts: RangeBoundary
   rangeEndings: RangeBoundary
 } {
@@ -413,13 +420,11 @@ function extractRanges(
   const rangeStarts: RangeBoundary = []
   const rangeEndings: RangeBoundary = []
 
-  // const ranges: Array<FieldRangeFilter> = []
-  const used = new Set<DbQuery>()
   const fieldQueries = queries.filter(
     q => dbQueryToDottedField(q) === indexField
   )
   if (!fieldQueries.length) {
-    return { rangeStarts, rangeEndings, usedQueries: used }
+    return { rangeStarts, rangeEndings }
   }
   // Assuming queries are sorted by specificity, the best bet is to pick the first query
   // TODO: add range intersection for most common cases (e.g. gte + ne)
@@ -429,21 +434,8 @@ function extractRanges(
   if (filter.comparator === DbComparator.IN && !Array.isArray(filter.value)) {
     throw new Error("The argument to the `in` predicate should be an array")
   }
-  if (
-    isMultiKeyField &&
-    (filter.comparator === DbComparator.NE ||
-      filter.comparator === DbComparator.NIN)
-  ) {
-    // NE and NIN are not supported by multi-key indexes. Why?
-    //   Imagine a node { id: 1, field: [`foo`, `bar`] }
-    //   Then the filter { field: { ne: `foo` } } should completely remove this node from results.
-    //   But multikey index contains separate entries for `foo` and `bar` values.
-    //   Our range will not include entry "foo" but it will still include entry for "bar" hence
-    //   will include this node in results.
-    return { rangeStarts, rangeEndings, usedQueries: used }
-  }
 
-  used.add(bestMatchingQuery)
+  context.usedQueries.add(bestMatchingQuery)
 
   switch (filter.comparator) {
     case DbComparator.EQ:
@@ -486,6 +478,7 @@ function extractRanges(
         filter.comparator === DbComparator.LT ? value : getValueEdgeAfter(value)
 
       // Try to find matching GTE/GT filter
+      const used = context.usedQueries
       const start =
         findRangeEdge(fieldQueries, used, DbComparator.GTE) ??
         findRangeEdge(fieldQueries, used, DbComparator.GT, ValueEdges.AFTER)
@@ -522,6 +515,7 @@ function extractRanges(
           : getValueEdgeAfter(value)
 
       // Try to find matching LT/LTE
+      const used = context.usedQueries
       const end =
         findRangeEdge(fieldQueries, used, DbComparator.LTE, ValueEdges.AFTER) ??
         findRangeEdge(fieldQueries, used, DbComparator.LT)
@@ -564,7 +558,7 @@ function extractRanges(
     default:
       throw new Error(`Unsupported predicate: ${filter.comparator}`)
   }
-  return { usedQueries: used, rangeStarts, rangeEndings }
+  return { rangeStarts, rangeEndings }
 }
 
 function findRangeEdge(
@@ -619,23 +613,6 @@ function getValueEdgeAfter(value: IndexFieldValue): RangeEdgeAfter {
 }
 function getValueEdgeBefore(value: IndexFieldValue): RangeEdgeBefore {
   return [undefinedSymbol, value]
-}
-
-function compareByPredicateSpecificity(a: DbQuery, b: DbQuery): number {
-  const aPredicate = getFilterStatement(a).comparator
-  const bPredicate = getFilterStatement(b).comparator
-  if (aPredicate === bPredicate) {
-    return 0
-  }
-  for (const predicate of canUseIndex) {
-    if (predicate === aPredicate) {
-      return -1
-    }
-    if (predicate === bPredicate) {
-      return 1
-    }
-  }
-  throw new Error(`Unexpected predicate pair: ${aPredicate}, ${bPredicate}`)
 }
 
 function toIndexFieldValue(

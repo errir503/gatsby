@@ -6,9 +6,9 @@ import {
   dbQueryToDottedField,
   getFilterStatement,
   prepareQueryArgs,
+  sortBySpecificity,
 } from "../../common/query"
 import { isDesc } from "./common"
-import { getQueriesThatCanUseIndex } from "./filter-using-index"
 
 interface ISelectIndexArgs {
   filter: IRunQueryArgs["queryArgs"]["filter"]
@@ -70,6 +70,26 @@ export function suggestIndex({
     .filter(([name]) => !overlap.has(name))
 
   return dedupeAndTrim([...filterFields, ...sortFields], maxFields)
+}
+
+/**
+ * Returns queries that can potentially use index.
+ * Returned list is sorted by query specificity
+ */
+function getQueriesThatCanUseIndex(all: Array<DbQuery>): Array<DbQuery> {
+  const canUseIndex = new Set([
+    DbComparator.EQ,
+    DbComparator.IN,
+    DbComparator.GTE,
+    DbComparator.LTE,
+    DbComparator.GT,
+    DbComparator.LT,
+    DbComparator.NIN,
+    DbComparator.NE,
+  ])
+  return sortBySpecificity(
+    all.filter(q => canUseIndex.has(getFilterStatement(q).comparator))
+  )
 }
 
 function getSortFieldsThatCanUseIndex(
