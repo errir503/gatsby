@@ -70,7 +70,11 @@ exports.sourceNodes = async ({ actions: { createNode } }) => {
 
 const pageTemplate = require.resolve(`./src/templates/${FILTER}.js`)
 exports.createPages = async ({ actions: { createPage } }) => {
-  console.log(`Creating ${NUM_PAGES} pages for filter: ${FILTER}`)
+  console.log(
+    `Creating ${NUM_PAGES} pages for filter: ${FILTER} (SORT: ${
+      SORT || `0`
+    }, COUNT: ${COUNT || `0`})`
+  )
   for (let pageNum = 0; pageNum < NUM_PAGES; pageNum++) {
     createPage({
       path: `/path/${pageNum}/`,
@@ -90,14 +94,15 @@ exports.createPages = async ({ actions: { createPage } }) => {
         skip: nodesPerPage * pageNum,
         nodesTotal: NUM_NODES,
         pagesTotal: NUM_PAGES,
-        sort: {
-          fields:
-            !SORT || SORT === `0`
-              ? []
-              : SORT === `1`
-              ? ["random"]
-              : SORT.split(`,`).map(f => f.trim()),
-        },
+        sort:
+          !SORT || SORT === `0`
+            ? undefined
+            : {
+                fields:
+                  SORT === `1`
+                    ? ["random"]
+                    : SORT.split(`,`).map(f => f.trim()),
+              },
         count: COUNT,
         fooBarRegex: `/${[`foo`, `bar`, `baz`, `foobar`][pageNum % 4]}/`,
       },
