@@ -9,16 +9,13 @@ export default ({ data }) => {
 }
 
 export const query = graphql`
-  query($fooBar: String!, $fooBarBaz: String!, $sort: TestSortInput) {
-    allTest(
-      filter: { fooBar: { eq: $fooBar }, fooBarBaz: { eq: $fooBarBaz } }
-      sort: $sort
-      limit: 100
-    ) {
+  query($pageNum: Int!, $sort: TestSortInput, $count: Boolean!) {
+    allTest(filter: { nodeNum: { eq: $pageNum } }, sort: $sort, limit: 1) {
       nodes {
         nodeNum
         text
       }
+      totalCount @include(if: $count)
     }
   }
 `

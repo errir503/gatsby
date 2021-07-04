@@ -9,9 +9,14 @@ export default ({ data }) => {
 }
 
 export const query = graphql`
-  query($fooBarArray: [String!], $sort: TestSortInput, $count: Boolean!) {
+  query(
+    $fooBar: String!
+    $fooBarBaz: String!
+    $sort: TestSortInput
+    $count: Boolean!
+  ) {
     allTest(
-      filter: { fooBar: { nin: $fooBarArray } }
+      filter: { fooBar: { eq: $fooBar }, fooBarBaz: { eq: $fooBarBaz } }
       sort: $sort
       limit: 100
     ) {
